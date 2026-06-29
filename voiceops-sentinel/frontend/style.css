@@ -588,6 +588,13 @@ audio {
     border-color: rgba(124, 58, 237, 0.15);
 }
 
+.segment-item.active-segment {
+    background-color: rgba(124, 58, 237, 0.12) !important;
+    border-color: var(--accent-blue) !important;
+    box-shadow: 0 0 10px rgba(124, 58, 237, 0.15);
+}
+
+
 .segment-header {
     display: flex;
     justify-content: space-between;

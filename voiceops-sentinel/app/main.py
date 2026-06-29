@@ -161,6 +161,10 @@ if not frontend_dir.exists():
     frontend_dir = Path("frontend")
     os.makedirs(frontend_dir, exist_ok=True)
 
+audio_dir = Path(__file__).parent.parent / "data" / "audio"
+os.makedirs(audio_dir, exist_ok=True)
+
+
 
 @app.get("/static/{filepath:path}", include_in_schema=False)
 async def serve_static(filepath: str):
@@ -459,6 +463,12 @@ async def transcribe_audio(
         result.latency_report = latency_report.to_dict()
         latency_report.log(str(result.job_id))
 
+        # Save preprocessed WAV file persistently for streaming
+        if preprocessed_wav and preprocessed_wav.exists():
+            persistent_wav = audio_dir / f"{result.job_id}.wav"
+            shutil.copy2(str(preprocessed_wav), str(persistent_wav))
+            logger.info("Saved persistent audio for streaming: %s", persistent_wav)
+
         logger.info(
             "Transcription complete: job_id=%s, segments=%d, duration=%.2fs, wer=%s",
             result.job_id, len(result.segments), result.duration_seconds,
@@ -466,6 +476,7 @@ async def transcribe_audio(
         )
 
         return result
+
 
     finally:
         # ── 6. Cleanup temp files ─────────────────────────────────────────────
@@ -532,4 +543,31 @@ async def delete_call(job_id: str) -> dict:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Call record with ID '{job_id}' not found."
         )
+
+    # Clean up persistent audio file if it exists
+    persistent_wav = audio_dir / f"{job_id}.wav"
+    if persistent_wav.exists():
+        try:
+            os.remove(persistent_wav)
+            logger.info("Deleted persistent audio file: %s", persistent_wav)
+        except Exception as e:
+            logger.error("Failed to delete persistent audio file %s: %s", persistent_wav, e)
+
     return {"status": "deleted", "job_id": job_id}
+
+
+@app.get(
+    "/calls/{job_id}/audio",
+    summary="Get audio file for a call",
+    tags=["Calls"],
+)
+async def get_call_audio(job_id: str) -> FileResponse:
+    """Retrieve the preprocessed audio WAV file for streaming/playback."""
+    persistent_wav = audio_dir / f"{job_id}.wav"
+    if not persistent_wav.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Audio file for job '{job_id}' not found."
+        )
+    return FileResponse(str(persistent_wav), media_type="audio/wav")
+

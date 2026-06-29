@@ -1,12 +1,12 @@
 # 🎙️ VoiceOps Sentinel
-### Real-Time Call Intelligence System — Week 1: Transcription Pipeline
+### Real-Time Call Intelligence System — Week 2: Intelligence Layer
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green.svg)](https://fastapi.tiangolo.com)
 [![Whisper API](https://img.shields.io/badge/ASR-Whisper--1-orange.svg)](https://openai.com/research/whisper)
-[![WER Target](https://img.shields.io/badge/WER-<15%%20clean%20|%20<30%%20noisy-brightgreen.svg)](#wer-evaluation)
+[![WER Target](https://img.shields.io/badge/WER-<15%25%20clean%20|%20<30%25%20noisy-brightgreen.svg)](#-wer-evaluation)
 
-A **production-grade audio transcription pipeline** built for customer support call centers. Ingests mp3/wav/flac audio, preprocesses it for optimal ASR performance, transcribes via OpenAI Whisper (with Deepgram fallback), and returns structured JSON with timestamped segments.
+VoiceOps Sentinel is a **production-grade audio transcription and call intelligence pipeline** designed for customer support operations. The system validates and preprocesses audio uploads, runs multi-engine speech recognition (Whisper / Deepgram fallback), applies Presidio PII redaction, extracts actionable follow-ups, structures speaker-labeled transcripts, generates call summaries, and measures stage latency against strict targets.
 
 ---
 
@@ -17,12 +17,11 @@ A **production-grade audio transcription pipeline** built for customer support c
 - [Installation](#-installation)
 - [Configuration](#-configuration)
 - [Running the Server](#-running-the-server)
-- [API Usage](#-api-usage)
+- [API Reference](#-api-reference)
 - [WER Evaluation](#-wer-evaluation)
 - [Running Tests](#-running-tests)
 - [Project Structure](#-project-structure)
-- [Linting](#-linting)
-- [Sample Output](#-sample-output)
+- [Security & Best Practices](#-security--best-practices)
 
 ---
 
@@ -54,26 +53,29 @@ Audio File (mp3/wav/flac)
          │ Retry: 3 attempts, exponential backoff (1→8s)
          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  ★ Week 2: Intelligence Layer (NEW)                      │
-│  ───────────────────────────────────────────────────    │
-│  CallSummarizer (app/summarizer.py)                     │
-│    • GPT-3.5-turbo: structured Issue/Resolution/Follow-up│
-│    • Extractive fallback: keyword-scored sentence ranking│
-│                                                          │
-│  LatencyTracker (app/latency_tracker.py)                │
-│    • Per-stage timing: preprocess / transcribe / intel   │
-│    • Target: intelligence output < 3s after audio ends   │
+│  Smart Processing & Redaction (app/smart_features.py)  │
+│    • PII Redaction: Presidio (names, emails, phone numbers)│
+│    • speaker classification (Agent/Customer channels)   │
+│    • quality alerts & customer frustration indicators   │
 └────────┬────────────────────────────────────────────────┘
          │
          ▼
-┌───────────────────┐
-│  TranscriptionResult │  Structured JSON response (v2.0)
-│  • job_id (UUID)  │  • segments [ {id, start, end, text} ]
-│  • duration_secs  │  • full_transcript + redacted_transcript
-│  • language       │  • wer_score (optional)
-│  • summary        │  • summary_issue / resolution / follow_up ★
-│  • latency_report │  • latency_report { stage_ms, intel_ok } ★
-└───────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  Intelligence Layer (app/summarizer.py)                 │
+│    • CallSummarizer: GPT-3.5 structured Issue/Resolution │
+│    • Extractive fallback: TF-IDF local sentence ranker  │
+│                                                          │
+│  LatencyTracker (app/latency_tracker.py)                │
+│    • Per-stage timer: preprocess / transcribe / intel   │
+│    • Target: intelligence stage runtime < 3.0s          │
+└────────┬────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────┐
+│  SQLite DB & Operations Dashboard                       │
+│    • Stores metadata, summaries, segments, latency logs │
+│    • Dynamic frontend charts (Chart.js) + sync audio    │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -87,14 +89,12 @@ Audio File (mp3/wav/flac)
 | OpenAI API Key | — | [platform.openai.com](https://platform.openai.com) |
 | Deepgram API Key | — | [deepgram.com](https://deepgram.com) *(optional)* |
 
-> **Note:** ffmpeg is required by pydub for audio decoding. Without it, mp3/flac loading will fail.
-
 ---
 
 ## 🚀 Installation
 
 ```bash
-# 1. Clone / navigate to the project
+# 1. Navigate to the project directory
 cd voiceops-sentinel
 
 # 2. Create virtual environment
@@ -104,10 +104,7 @@ source .venv/bin/activate    # Windows: .venv\Scripts\activate
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Install ffmpeg (macOS)
-brew install ffmpeg
-
-# 5. Copy environment template
+# 4. Copy environment template
 cp .env.example .env
 # → Edit .env and add your API keys
 ```
@@ -116,22 +113,18 @@ cp .env.example .env
 
 ## ⚙️ Configuration
 
-Edit `.env` (never commit this file):
+Edit `.env` (this file is excluded from git):
 
 ```dotenv
-# Primary ASR
+# Primary ASR Configuration
 OPENAI_API_KEY=sk-your-key-here
 
-# Fallback ASR (activate by setting ASR_BACKEND=deepgram)
+# Fallback ASR Configuration
 DEEPGRAM_API_KEY=your-deepgram-key
+ASR_BACKEND=whisper  # "whisper" (default) or "deepgram"
 
-# Backend selection: "whisper" (default) | "deepgram"
-ASR_BACKEND=whisper
-
-# File size limit (bytes): default 25 MB
+# System Limits & Diagnostics
 MAX_FILE_SIZE_BYTES=26214400
-
-# Logging
 LOG_LEVEL=INFO
 LOG_DIR=logs
 ```
@@ -140,108 +133,91 @@ LOG_DIR=logs
 
 ## ▶️ Running the Server
 
-```bash
-# Development (auto-reload)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+Since port `8000` is reserved by secondary services (e.g. StatBot Pro), VoiceOps Sentinel runs on port **`8001`**:
 
-# Production
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+```bash
+# Development (with auto-reload)
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc UI:**   http://localhost:8000/redoc
-- **Health:**     http://localhost:8000/health
+- **Operations Dashboard:** http://localhost:8001/dashboard
+- **Swagger Documentation:** http://localhost:8001/docs
+- **Health Diagnostics:** http://localhost:8001/health
 
 ---
 
-## 🔌 API Usage
+## 🔌 API Reference
 
-### `POST /transcribe`
+### 1. `POST /transcribe`
+Uploads and transcribes audio files, executes PII redaction, and processes Week 2 intelligence metadata.
 
-Upload an audio file and receive a structured transcript.
+- **Request**:
+  - `file`: Audio file (`.mp3`, `.wav`, `.flac`, max 25 MB)
+  - `language` *(optional)*: BCP-47 language code (e.g. `en`, `hi`)
+  - `reference_text` *(optional)*: Reference text for computing Word Error Rate.
+- **cURL Example**:
+  ```bash
+  curl -X POST http://localhost:8001/transcribe \
+    -F "file=@sample_audio/clean_call.wav" \
+    -F "reference_text=Hello thank you for calling support"
+  ```
 
-#### cURL Example
+### 2. `GET /calls`
+Returns an array of all call history records stored in the database.
 
-```bash
-curl -X POST http://localhost:8000/transcribe \
-  -F "file=@sample_audio/clean_call.wav" \
-  -F "language=en"
-```
+### 3. `GET /calls/{job_id}`
+Returns details for a single call record.
 
-#### With reference text for WER scoring
+### 4. `DELETE /calls/{job_id}`
+Permanently removes a call record and its associated audio file.
 
-```bash
-curl -X POST http://localhost:8000/transcribe \
-  -F "file=@sample_audio/clean_call.wav" \
-  -F "language=en" \
-  -F "reference_text=Hello thank you for calling support"
-```
+### 5. `GET /stats`
+Returns aggregated analytics metrics (averages, sentiments, flagged totals) for the Operations Dashboard.
 
-#### Python (httpx)
+### 6. `GET /calls/{job_id}/audio`
+Retrieves the preprocessed WAV audio file for browser playback and real-time streaming.
 
-```python
-import httpx
-
-with open("sample_audio/call.wav", "rb") as f:
-    response = httpx.post(
-        "http://localhost:8000/transcribe",
-        files={"file": ("call.wav", f, "audio/wav")},
-        data={"language": "en"},
-    )
-
-result = response.json()
-print(result["full_transcript"])
-```
-
-#### Request Parameters
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `file` | `UploadFile` | ✅ | Audio file (.mp3, .wav, .flac, max 25 MB) |
-| `language` | `string` | ❌ | BCP-47 language hint (e.g. `en`, `es`, `fr`) |
-| `reference_text` | `string` | ❌ | Ground-truth text for WER calculation |
-
-#### HTTP Status Codes
-
-| Code | Meaning |
-|---|---|
-| `200` | Transcription successful |
-| `400` | Invalid file format or missing filename |
-| `413` | File exceeds 25 MB limit |
-| `415` | Unsupported media type |
-| `500` | Preprocessing or transcription failed |
-| `503` | ASR backend unavailable (missing API key) |
 
 ---
 
-## 📊 Sample Output
+## 📊 Sample Response (with Intelligence Details)
 
 ```json
 {
   "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "audio_file": "customer_call.wav",
-  "duration_seconds": 142.5,
+  "duration_seconds": 12.4,
   "language": "en",
   "segments": [
     {
       "id": 0,
       "start": 0.0,
-      "end": 4.2,
-      "text": "Hello, thank you for calling support.",
-      "confidence": 0.9512
-    },
-    {
-      "id": 1,
-      "start": 4.2,
-      "end": 9.1,
-      "text": "My name is Alex. How can I help you today?",
-      "confidence": 0.9231
+      "end": 4.1,
+      "text": "Hello, my phone is +91-[REDACTED PHONE]. I need a refund.",
+      "speaker": "Customer",
+      "confidence": 0.941
     }
   ],
-  "full_transcript": "Hello, thank you for calling support. My name is Alex. How can I help you today?",
-  "wer_score": null,
-  "processed_at": "2026-06-17T08:00:00.000000+00:00",
-  "asr_backend": "whisper"
+  "full_transcript": "Hello, my phone is +91-[REDACTED PHONE]. I need a refund.",
+  "wer_score": 0.083,
+  "processed_at": "2026-06-26T05:00:00Z",
+  "asr_backend": "whisper",
+  "flagged": true,
+  "sentiment": "Negative",
+  "sentiment_score": -0.85,
+  "summary": "Customer called requesting a refund for billing discrepancies.",
+  "summary_issue": "Refund request",
+  "summary_resolution": "Agent processing transaction",
+  "summary_follow_up": "None",
+  "summary_engine": "extractive",
+  "latency_report": {
+    "preprocess_ms": 120.4,
+    "transcribe_ms": 1105.1,
+    "intelligence_ms": 420.2,
+    "total_ms": 1645.7,
+    "intelligence_within_target": true,
+    "target_s": 3.0
+  }
 }
 ```
 
@@ -249,21 +225,10 @@ print(result["full_transcript"])
 
 ## 📈 WER Evaluation
 
-The WER (Word Error Rate) evaluator tests transcription accuracy across 3 simulated noise scenarios:
-
-| Scenario | Simulation Strategy | Target WER |
-|---|---|---|
-| Background Office Noise | Word substitutions from confusion dictionary (~10%) | < 30% |
-| Accented Speech | Phoneme-adjacent word replacements (~15%) | < 30% |
-| Phone Call Quality (Low Bitrate) | Word deletions + filler insertion (~20%) | < 30% |
-
-### Run the WER Report
+Verify transcription accuracy across 3 predefined noise scenarios:
 
 ```bash
-# Run full WER test suite with verbose output
-pytest tests/test_wer.py -v
-
-# See formatted WER report (no API calls needed)
+# See formatted WER report (completely local - no API credentials needed)
 python -c "
 from app.wer_evaluator import run_wer_test_suite, print_wer_report
 report = run_wer_test_suite()
@@ -271,44 +236,21 @@ print_wer_report(report)
 "
 ```
 
-### Sample WER Report Output
-
-```
-────────────────────────────────────────────────────────────────────────────────
-  VoiceOps Sentinel – WER Evaluation Report
-────────────────────────────────────────────────────────────────────────────────
-  Scenario                                     WER  Threshold    Status
-────────────────────────────────────────────────────────────────────────────────
-  Background Office Noise                    8.33%        30%   ✅ PASS
-  Accented Speech Simulation                 9.09%        30%   ✅ PASS
-  Phone Call Quality (Low Bitrate)          14.29%        30%   ✅ PASS
-────────────────────────────────────────────────────────────────────────────────
-  Average WER                               10.57%        30%   ✅ PASS
-────────────────────────────────────────────────────────────────────────────────
-```
+| Scenario | Target Threshold | Simulation Strategy |
+|---|---|---|
+| Office Noise | < 30.0% WER | Word substitutions (~10%) |
+| Accented Speech | < 30.0% WER | Confused phonetic replacements (~15%) |
+| Phone Call Quality | < 30.0% WER | Frame-rate deletions (~20%) |
 
 ---
 
 ## 🧪 Running Tests
 
+A comprehensive suite of **76 tests** covers the transcription dispatchers, preprocessing conversions, Presidio redactions, summarization, and latency timer modules.
+
 ```bash
-# Install test dependencies (already in requirements.txt)
-pip install -r requirements.txt
-
-# Run all tests
-pytest -v
-
-# Run only WER tests (no API calls)
-pytest tests/test_wer.py -v
-
-# Run only preprocessor tests
-pytest tests/test_preprocessor.py -v
-
-# Run only transcriber tests (mocked)
-pytest tests/test_transcriber.py -v
-
-# Run with coverage
-pytest --cov=app --cov-report=term-missing
+# Run pytest globally using the venv interpreter
+.venv/bin/pytest -v
 ```
 
 ---
@@ -318,57 +260,32 @@ pytest --cov=app --cov-report=term-missing
 ```
 voiceops-sentinel/
 ├── app/
-│   ├── __init__.py          # Package metadata
-│   ├── main.py              # FastAPI app + /transcribe + /health endpoints
-│   ├── transcriber.py       # Whisper & Deepgram ASR engines + retry logic
-│   ├── preprocessor.py      # pydub audio normalization & format conversion
-│   ├── wer_evaluator.py     # jiwer WER/CER + noise simulation test suite
-│   └── schemas.py           # Pydantic v2 request/response models
+│   ├── main.py              # FastAPI app routing & lifespans
+│   ├── transcriber.py       # ASR engines + backoff retries
+│   ├── preprocessor.py      # Audio conversions & loudness normalization
+│   ├── smart_features.py    # PII redactor, alerts, and action items
+│   ├── summarizer.py        # CallSummarizer (GPT-3.5 + extractive fallback)
+│   ├── latency_tracker.py   # Stage microsecond timing & benchmarks
+│   ├── schemas.py           # Pydantic validation models
+│   └── database.py          # SQLite connections and migrations
 ├── tests/
-│   ├── __init__.py
-│   ├── test_transcriber.py  # Mocked ASR unit tests
-│   ├── test_preprocessor.py # Audio processing unit tests
-│   └── test_wer.py          # WER calculation & scenario tests
-├── sample_audio/            # Place test .mp3/.wav/.flac files here
-│   └── README.md
-├── logs/                    # Auto-created; daily rotating log files
-├── conftest.py              # Shared pytest fixtures
-├── .env.example             # Environment template (copy → .env)
-├── requirements.txt         # Pinned Python dependencies
-└── README.md                # This file
+│   ├── test_transcriber.py  # Mocked transcriber tests
+│   ├── test_preprocessor.py # Preprocessor conversions verification
+│   ├── test_wer.py          # jiwer metrics unit tests
+│   └── test_intelligence.py # Summarization and latency unit tests
+├── frontend/
+│   ├── index.html           # Landing layout Page
+│   ├── dashboard.html       # Operations Workspace layout
+│   ├── app.js               # Audio player sync, filters, and rendering pipeline
+│   └── style.css            # Dark/Glassmorphic dashboard theme
+├── requirements.txt         # Pinned packages list
+└── README.md                # System documentation
 ```
 
 ---
 
-## 🔍 Linting
+## 🔐 Security & Best Practices
 
-```bash
-# Run flake8 on all source files
-flake8 app/ tests/ --max-line-length=99
-
-# Expected output: no errors
-```
-
----
-
-## 🔐 Security Notes
-
-1. **Never commit `.env`** — it is listed in `.gitignore`
-2. API keys are loaded exclusively from environment variables via `python-dotenv`
-3. Temporary audio files are written to isolated temp directories and cleaned up after each request
-4. File size is validated server-side (not relying on client `Content-Length`)
-
----
-
-## 🗺️ Roadmap
-
-| Week | Feature | Status |
-|---|---|---|
-| Week 1 | Transcription Pipeline: Whisper ASR + WER evaluation | ✅ Done |
-| Week 2 | Intelligence Layer: LLM summarisation + sentiment + latency tracking | ✅ Done |
-| Week 3 | Diarization (Pyannote) + PII redaction (spaCy/Presidio) | 🔜 Next |
-| Week 4 | Dashboard UI + live audio streaming + time-synced audio player | 📋 Planned |
-
----
-
-
+1. **Environment Separation**: API keys are loaded via `.env` files and never committed to version control.
+2. **Resource Management**: Temp directories containing uploaded audio binaries are immediately purged upon completion or HTTP failure.
+3. **Cache Invalidation**: Custom Static File responses set strict `Cache-Control` headers, bypassing local cached copies to deliver updated scripts instantly.

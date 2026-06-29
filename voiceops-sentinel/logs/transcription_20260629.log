@@ -1,0 +1,18 @@
+2026-06-29 21:24:51,986 | INFO     | root:86 | Logging initialised: level=20, file=logs/transcription_20260629.log
+2026-06-29 21:24:51,994 | INFO     | app.database:56 | Database initialized successfully at ./voiceops.db
+2026-06-29 21:24:51,994 | INFO     | app.main:116 | VoiceOps Sentinel starting up | ASR_BACKEND=whisper | MAX_FILE_SIZE=26214400 bytes
+2026-06-29 21:25:11,899 | INFO     | app.main:122 | VoiceOps Sentinel shutting down…
+2026-06-29 21:25:12,362 | INFO     | root:86 | Logging initialised: level=20, file=logs/transcription_20260629.log
+2026-06-29 21:25:12,365 | INFO     | app.database:56 | Database initialized successfully at ./voiceops.db
+2026-06-29 21:25:12,365 | INFO     | app.main:116 | VoiceOps Sentinel starting up | ASR_BACKEND=whisper | MAX_FILE_SIZE=26214400 bytes
+2026-06-29 21:25:45,297 | INFO     | app.main:122 | VoiceOps Sentinel shutting down…
+2026-06-29 21:25:45,734 | INFO     | root:86 | Logging initialised: level=20, file=logs/transcription_20260629.log
+2026-06-29 21:25:45,737 | INFO     | app.database:56 | Database initialized successfully at ./voiceops.db
+2026-06-29 21:25:45,737 | INFO     | app.main:116 | VoiceOps Sentinel starting up | ASR_BACKEND=whisper | MAX_FILE_SIZE=26214400 bytes
+2026-06-29 21:29:48,583 | INFO     | app.main:122 | VoiceOps Sentinel shutting down…
+2026-06-29 21:29:49,133 | INFO     | root:86 | Logging initialised: level=20, file=logs/transcription_20260629.log
+2026-06-29 21:29:49,135 | INFO     | app.database:56 | Database initialized successfully at ./voiceops.db
+2026-06-29 21:29:49,135 | INFO     | app.main:116 | VoiceOps Sentinel starting up | ASR_BACKEND=whisper | MAX_FILE_SIZE=26214400 bytes
+2026-06-29 21:39:41,287 | INFO     | root:86 | Logging initialised: level=20, file=logs/transcription_20260629.log
+2026-06-29 21:39:41,291 | INFO     | app.database:56 | Database initialized successfully at ./voiceops.db
+2026-06-29 21:39:41,291 | INFO     | app.main:116 | VoiceOps Sentinel starting up | ASR_BACKEND=whisper | MAX_FILE_SIZE=26214400 bytes

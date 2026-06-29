@@ -277,6 +277,10 @@ function renderDetailsPane() {
     const pane = document.getElementById('details-pane');
     if (!pane || !selectedCall) return;
 
+    // Reset player state variables
+    useTTS = false;
+    currentHighlightedIndex = -1;
+
     // Parse segments out of speakers or JSON representation
     let segments = selectedCall.segments || [];
     if (typeof segments === 'string') {
@@ -301,12 +305,12 @@ function renderDetailsPane() {
         ? actionItems.map(item => `<li>${item}</li>`).join('')
         : `<li style="list-style:none; color:var(--text-secondary);">No action items extracted.</li>`;
 
-    // Map segments
-    const transcriptHtml = segments.map(seg => {
+    // Map segments with data-start and data-end attributes
+    const transcriptHtml = segments.map((seg, idx) => {
         const speakerClass = (seg.speaker || '').toLowerCase() === 'agent' ? 'agent' : 'customer';
         const formattedText = highlightPII(seg.text);
         return `
-            <div class="segment-item" onclick="playSegmentText('${seg.text.replace(/'/g, "\\'")}', ${seg.start})">
+            <div class="segment-item" id="seg-${idx}" data-start="${seg.start}" data-end="${seg.end}" onclick="playAudioSegment(${seg.start}, ${seg.end}, ${idx})">
                 <div class="segment-header">
                     <span class="segment-speaker ${speakerClass}">${seg.speaker || 'Speaker A'}</span>
                     <span>${formatDuration(seg.start)} - ${formatDuration(seg.end)}</span>
@@ -354,20 +358,31 @@ function renderDetailsPane() {
         <!-- Week 2: Intelligence Layer — Call Summary Panel -->
         ${renderIntelligencePanel(selectedCall)}
 
-        <!-- Audio Sync Synthesizer -->
+        <!-- Real Audio Streaming & Sync Player -->
         <div class="audio-player-container">
             <div style="display:flex; justify-content:space-between; align-items:center;">
-                <span style="font-size:0.8125rem; font-weight:600;">Simulated Audio Sync &amp; Speech</span>
-                <span style="font-size:0.75rem; color:var(--text-secondary);" id="audio-time-label">0.0s / ${formatDuration(selectedCall.duration_seconds)}</span>
+                <span style="font-size:0.8125rem; font-weight:600; display:flex; align-items:center; gap:0.5rem;">
+                    <span id="player-mode-badge" class="badge badge-success">📻 Live Stream</span>
+                    <span id="player-title">Call Recording Playback</span>
+                </span>
+                <span style="font-size:0.75rem; color:var(--text-secondary); font-family:monospace;" id="audio-time-label">0.0s / ${formatDuration(selectedCall.duration_seconds)}</span>
             </div>
-            <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.5rem;">
-                <button class="nav-btn" id="audio-play-btn" onclick="speakFullTranscript()" style="padding: 0.25rem 0.75rem; font-size:0.75rem; background: var(--accent-blue); box-shadow:none;">🔊 Read Aloud</button>
-                <button class="btn-secondary" id="audio-stop-btn" onclick="stopSpeech()" style="padding: 0.25rem 0.75rem; font-size:0.75rem;">⏹ Stop</button>
-                <div style="flex:1; height:4px; background:var(--border-color); border-radius:2px; position:relative; overflow:hidden;">
-                    <div id="audio-progress-bar" style="position:absolute; top:0; left:0; width:0%; height:100%; background:var(--accent-blue); transition: width 0.1s linear;"></div>
+            <div style="display:flex; gap:0.75rem; align-items:center; margin-top:0.75rem;">
+                <button class="nav-btn" id="audio-play-btn" onclick="toggleAudioPlayback()" style="padding: 0.35rem 0.85rem; font-size:0.75rem; background: var(--accent-blue); box-shadow:none; display:flex; align-items:center; gap:0.25rem;">
+                    <span id="play-btn-icon">▶</span> <span id="play-btn-text">Play Call</span>
+                </button>
+                <button class="btn-secondary" id="audio-stop-btn" onclick="stopAudioPlayback()" style="padding: 0.35rem 0.85rem; font-size:0.75rem;">⏹ Stop</button>
+                
+                <!-- Clickable Progress Track -->
+                <div id="audio-progress-track" onclick="onProgressTrackClick(event)" style="flex:1; height:6px; background:var(--border-color); border-radius:3px; position:relative; cursor:pointer; overflow:hidden;">
+                    <div id="audio-progress-bar" style="position:absolute; top:0; left:0; width:0%; height:100%; background:var(--accent-blue); transition: width 0.05s linear;"></div>
                 </div>
             </div>
-            <p style="font-size:0.6875rem; color:var(--text-secondary); margin-top:0.25rem;">💡 Click on any segment block below to read it out and highlight.</p>
+            
+            <!-- Hidden native audio element -->
+            <audio id="active-call-audio" src="${API_URL}/calls/${selectedCall.job_id}/audio" style="display:none;" ontimeupdate="onAudioTimeUpdate()" onended="onAudioEnded()" onerror="onAudioError()"></audio>
+            
+            <p style="font-size:0.6875rem; color:var(--text-secondary); margin-top:0.35rem;">💡 Click any segment below to seek &amp; play from that moment. Tracks active segment in real-time.</p>
         </div>
 
         <!-- Action Items List -->
@@ -387,6 +402,7 @@ function renderDetailsPane() {
         </div>
     `;
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Week 2: Intelligence Panel Renderer
@@ -467,8 +483,173 @@ function highlightPII(text) {
     });
 }
 
-// Speech Synthesis & Progress simulation
+// Real Audio Player & Sync / Speech Synthesis Fallback
+let useTTS = false;
+let currentHighlightedIndex = -1;
 let speechSynthUtterance = null;
+
+
+function onAudioError() {
+    console.warn("Audio file not found or failed to load. Falling back to SpeechSynthesis TTS.");
+    useTTS = true;
+    const badge = document.getElementById('player-mode-badge');
+    if (badge) {
+        badge.innerText = "🤖 TTS Simulation";
+        badge.className = "badge badge-warning";
+    }
+    const title = document.getElementById('player-title');
+    if (title) title.innerText = "TTS Voice Reader (Audio Missing)";
+}
+
+function toggleAudioPlayback() {
+    if (useTTS) {
+        speakFullTranscript();
+        return;
+    }
+
+    const audio = document.getElementById('active-call-audio');
+    const playBtnIcon = document.getElementById('play-btn-icon');
+    const playBtnText = document.getElementById('play-btn-text');
+    if (!audio) return;
+
+    if (audio.paused) {
+        audio.play().catch(err => {
+            console.error("Audio play failed, falling back to TTS:", err);
+            onAudioError();
+            speakFullTranscript();
+        });
+        if (playBtnIcon) playBtnIcon.innerText = "⏸";
+        if (playBtnText) playBtnText.innerText = "Pause";
+    } else {
+        audio.pause();
+        if (playBtnIcon) playBtnIcon.innerText = "▶";
+        if (playBtnText) playBtnText.innerText = "Play Call";
+    }
+}
+
+function stopAudioPlayback() {
+    if (useTTS) {
+        stopSpeech();
+        return;
+    }
+
+    const audio = document.getElementById('active-call-audio');
+    if (audio) {
+        audio.pause();
+        audio.currentTime = 0;
+    }
+    const playBtnIcon = document.getElementById('play-btn-icon');
+    const playBtnText = document.getElementById('play-btn-text');
+    if (playBtnIcon) playBtnIcon.innerText = "▶";
+    if (playBtnText) playBtnText.innerText = "Play Call";
+    
+    const progressBar = document.getElementById('audio-progress-bar');
+    if (progressBar) progressBar.style.width = '0%';
+    
+    // Clear highlights
+    clearSegmentHighlights();
+}
+
+function onAudioTimeUpdate() {
+    const audio = document.getElementById('active-call-audio');
+    if (!audio || !selectedCall) return;
+
+    const currentTime = audio.currentTime;
+    const duration = audio.duration || selectedCall.duration_seconds || 1;
+    const percent = (currentTime / duration) * 100;
+
+    const progressBar = document.getElementById('audio-progress-bar');
+    const timeLabel = document.getElementById('audio-time-label');
+
+    if (progressBar) progressBar.style.width = `${percent}%`;
+    if (timeLabel) {
+        timeLabel.innerText = `${currentTime.toFixed(1)}s / ${formatDuration(duration)}`;
+    }
+
+    // Highlight active transcript segment
+    highlightActiveSegment(currentTime);
+}
+
+function highlightActiveSegment(currentTime) {
+    const segments = selectedCall.segments || [];
+    let activeIdx = -1;
+
+    for (let i = 0; i < segments.length; i++) {
+        if (currentTime >= segments[i].start && currentTime <= segments[i].end) {
+            activeIdx = i;
+            break;
+        }
+    }
+
+    if (activeIdx !== currentHighlightedIndex) {
+        // Clear previous highlight
+        clearSegmentHighlights();
+        
+        if (activeIdx !== -1) {
+            const activeElem = document.getElementById(`seg-${activeIdx}`);
+            if (activeElem) {
+                activeElem.classList.add('active-segment');
+                // Smooth scroll segment into view if needed
+                activeElem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+        currentHighlightedIndex = activeIdx;
+    }
+}
+
+function clearSegmentHighlights() {
+    const items = document.querySelectorAll('.segment-item');
+    items.forEach(item => item.classList.remove('active-segment'));
+    currentHighlightedIndex = -1;
+}
+
+function onAudioEnded() {
+    stopAudioPlayback();
+}
+
+function onProgressTrackClick(event) {
+    if (useTTS) return;
+    const track = document.getElementById('audio-progress-track');
+    const audio = document.getElementById('active-call-audio');
+    if (!track || !audio || !selectedCall) return;
+
+    const rect = track.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const width = rect.width;
+    const duration = audio.duration || selectedCall.duration_seconds || 1;
+
+    const clickPercent = clickX / width;
+    audio.currentTime = clickPercent * duration;
+}
+
+function playAudioSegment(start, end, idx) {
+    if (useTTS) {
+        // Fallback: Read segment text using SpeechSynthesis
+        const elem = document.getElementById(`seg-${idx}`);
+        if (elem) {
+            const text = elem.querySelector('.segment-text').innerText;
+            playSegmentText(text, start);
+            clearSegmentHighlights();
+            elem.classList.add('active-segment');
+        }
+        return;
+    }
+
+    const audio = document.getElementById('active-call-audio');
+    if (!audio) return;
+
+    audio.currentTime = start;
+    if (audio.paused) {
+        audio.play().catch(() => onAudioError());
+        const playBtnIcon = document.getElementById('play-btn-icon');
+        const playBtnText = document.getElementById('play-btn-text');
+        if (playBtnIcon) playBtnIcon.innerText = "⏸";
+        if (playBtnText) playBtnText.innerText = "Pause";
+    }
+    
+    highlightActiveSegment(start);
+}
+
 function playSegmentText(text, startTime) {
     stopSpeech();
 
@@ -477,7 +658,6 @@ function playSegmentText(text, startTime) {
 
     speechSynthUtterance = new SpeechSynthesisUtterance(spokenText);
     
-    // Attempt to parse speaker to set voice/pitch
     speechSynthUtterance.rate = 1.0;
     speechSynthUtterance.pitch = 1.0;
 
@@ -521,6 +701,7 @@ function stopSpeech() {
     const progressBar = document.getElementById('audio-progress-bar');
     if (progressBar) progressBar.style.width = '0%';
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Upload File Logic
